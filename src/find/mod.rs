@@ -226,7 +226,7 @@ fn process_dir(
     ret
 }
 
-fn do_find(args: &[&str], deps: &dyn Dependencies) -> Result<i32, Box<dyn Error>> {
+async fn do_find(args: &[&str], deps: &dyn Dependencies) -> Result<i32, Box<dyn Error>> {
     let paths_and_matcher = parse_args(args)?;
     if paths_and_matcher.config.help_requested {
         print_help();
@@ -240,19 +240,19 @@ fn do_find(args: &[&str], deps: &dyn Dependencies) -> Result<i32, Box<dyn Error>
     let mut ret = 0;
     let mut quit = false;
     for path in paths_and_matcher.paths {
-        let dir_ret = process_dir(
-            &path,
-            &paths_and_matcher.config,
-            deps,
-            &*paths_and_matcher.matcher,
-            &mut quit,
-        );
-        if dir_ret != 0 {
-            ret = dir_ret;
-        }
-        if quit {
-            break;
-        }
+        // let dir_ret = process_dir(
+        //     &path,
+        //     &paths_and_matcher.config,
+        //     deps,
+        //     &*paths_and_matcher.matcher,
+        //     &mut quit,
+        // );
+        // if dir_ret != 0 {
+        //     ret = dir_ret;
+        // }
+        // if quit {
+        //     break;
+        // }
     }
 
     Ok(ret)
@@ -314,8 +314,8 @@ fn print_version() {
 /// All main has to do is pass in the command-line args and exit the process
 /// with the exit code. Note that the first string in args is expected to be
 /// the name of the executable.
-pub fn find_main(args: &[&str], deps: &dyn Dependencies) -> i32 {
-    match do_find(&args[1..], deps) {
+pub async fn find_main(args: &[&str], deps: &dyn Dependencies) -> i32 {
+    match do_find(&args[1..], deps).await {
         Ok(ret) => ret,
         Err(e) => {
             writeln!(&mut stderr(), "find: {e}").unwrap();
