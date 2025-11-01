@@ -595,14 +595,14 @@ mod tests {
             .expect("parsing should fail");
     }
 
-    #[test]
-    fn find_main_not_depth_first() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn find_main_not_depth_first() {
+        let deps = Box::new(FakeDependencies::new());
 
         let rc = find_main(
             &["find", &fix_up_slashes("./test_data/simple"), "-sorted"],
-            &deps,
-        );
+            deps,
+        ).await;
 
         assert_eq!(rc, 0);
         assert_eq!(
@@ -616,9 +616,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn find_main_depth_first() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn find_main_depth_first() {
+        let deps = Box::new(FakeDependencies::new());
 
         let rc = find_main(
             &[
@@ -627,8 +627,8 @@ mod tests {
                 "-sorted",
                 "-depth",
             ],
-            &deps,
-        );
+            deps,
+        ).await;
 
         assert_eq!(rc, 0);
         assert_eq!(
@@ -642,9 +642,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn find_maxdepth() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn find_maxdepth() {
+        let deps = Box::new(FakeDependencies::new());
 
         let rc = find_main(
             &[
@@ -654,8 +654,8 @@ mod tests {
                 "-maxdepth",
                 "2",
             ],
-            &deps,
-        );
+            deps,
+        ).await;
 
         assert_eq!(rc, 0);
         assert_eq!(
@@ -670,9 +670,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn find_maxdepth_depth_first() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn find_maxdepth_depth_first() {
+        let deps = Box::new(FakeDependencies::new());
 
         let rc = find_main(
             &[
@@ -683,8 +683,8 @@ mod tests {
                 "2",
                 "-depth",
             ],
-            &deps,
-        );
+            deps,
+        ).await;
 
         assert_eq!(rc, 0);
         assert_eq!(
@@ -699,9 +699,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn find_prune() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn find_prune() {
+        let deps = Box::new(FakeDependencies::new());
 
         let rc = find_main(
             &[
@@ -714,8 +714,8 @@ mod tests {
                 "1",
                 "-prune",
             ],
-            &deps,
-        );
+            deps,
+        ).await;
 
         assert_eq!(rc, 0);
         assert_eq!(
@@ -728,9 +728,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn find_zero_maxdepth() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn find_zero_maxdepth() {
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &[
                 "find",
@@ -738,8 +738,8 @@ mod tests {
                 "-maxdepth",
                 "0",
             ],
-            &deps,
-        );
+            deps,
+        ).await;
 
         assert_eq!(rc, 0);
         assert_eq!(
@@ -748,9 +748,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn find_zero_maxdepth_depth_first() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn find_zero_maxdepth_depth_first() {
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &[
                 "find",
@@ -759,8 +759,8 @@ mod tests {
                 "0",
                 "-depth",
             ],
-            &deps,
-        );
+            deps,
+        ).await;
 
         assert_eq!(rc, 0);
         assert_eq!(
@@ -769,9 +769,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn find_mindepth() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn find_mindepth() {
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &[
                 "find",
@@ -780,8 +780,8 @@ mod tests {
                 "-mindepth",
                 "3",
             ],
-            &deps,
-        );
+            deps,
+        ).await;
 
         assert_eq!(rc, 0);
         assert_eq!(
@@ -794,9 +794,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn find_mindepth_depth_first() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn find_mindepth_depth_first() {
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &[
                 "find",
@@ -806,8 +806,8 @@ mod tests {
                 "3",
                 "-depth",
             ],
-            &deps,
-        );
+            deps,
+        ).await;
 
         assert_eq!(rc, 0);
         assert_eq!(
@@ -820,13 +820,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn find_newer() {
+    #[tokio::test]
+    async fn find_newer() {
         // create a temp directory and file that are newer than the static
         // files in the source tree.
         let new_dir = Builder::new().prefix("find_newer").tempdir().unwrap();
 
-        let deps = FakeDependencies::new();
+        let deps = Box::new(FakeDependencies::new());
 
         let rc = find_main(
             &[
@@ -835,8 +835,8 @@ mod tests {
                 "-newer",
                 &fix_up_slashes("./test_data/simple/abbbc"),
             ],
-            &deps,
-        );
+            deps,
+        ).await;
 
         assert_eq!(rc, 0);
         assert_eq!(
@@ -845,7 +845,7 @@ mod tests {
         );
 
         // now do it the other way around, and nothing should be output
-        let deps = FakeDependencies::new();
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &[
                 "find",
@@ -853,15 +853,15 @@ mod tests {
                 "-newer",
                 &new_dir.path().to_string_lossy(),
             ],
-            &deps,
-        );
+            deps,
+        ).await;
 
         assert_eq!(rc, 0);
         assert_eq!(deps.get_output_as_string(), "");
     }
 
-    #[test]
-    fn find_mtime() {
+    #[tokio::test]
+    async fn find_mtime() {
         let meta = fs::metadata("./test_data/simple/subdir/ABBBC").unwrap();
 
         // metadata can return errors like StringError("creation time is not available on this platform currently")
@@ -871,19 +871,19 @@ mod tests {
         }
     }
 
-    #[test]
-    fn find_ctime() {
+    #[tokio::test]
+    async fn find_ctime() {
         let meta = fs::metadata("./test_data/simple/subdir/ABBBC").unwrap();
 
         // metadata can return errors like StringError("creation time is not available on this platform currently")
         // so skip tests that won't pass due to shortcomings in std::fs.
         if let Ok(file_time) = meta.changed() {
-            file_time_helper(file_time, "-ctime");
+            file_time_helper(file_time, "-ctime").await;
         }
     }
 
-    #[test]
-    fn find_atime() {
+    #[tokio::test]
+    async fn find_atime() {
         let meta = fs::metadata("./test_data/simple/subdir/ABBBC").unwrap();
 
         // metadata can return errors like StringError("creation time is not available on this platform currently")
@@ -894,10 +894,10 @@ mod tests {
     }
 
     /// Helper function for the `find_ctime/find_atime/find_mtime` tests.
-    fn file_time_helper(file_time: SystemTime, arg: &str) {
+    async fn file_time_helper(file_time: SystemTime, arg: &str) {
         // check file time matches a file that's old enough
         {
-            let mut deps = FakeDependencies::new();
+            let mut deps = Box::new(FakeDependencies::new());
             deps.set_time(file_time);
 
             let rc = find_main(
@@ -909,7 +909,7 @@ mod tests {
                     arg,
                     "0",
                 ],
-                &deps,
+                deps,
             );
 
             assert_eq!(rc, 0);
@@ -921,12 +921,12 @@ mod tests {
 
         // now Check file time doesn't match a file that's too new
         {
-            let mut deps = FakeDependencies::new();
+            let mut deps = Box::new(FakeDependencies::new());
             deps.set_time(file_time - Duration::from_secs(1));
 
             let rc = find_main(
                 &["find", "./test_data/simple/subdir", "-type", "f", arg, "0"],
-                &deps,
+                deps,
             );
 
             assert_eq!(rc, 0);
@@ -944,24 +944,24 @@ mod tests {
     //
     // So this test may not be too accurate and can only ensure that
     // the function can be correctly identified.
-    #[test]
-    fn find_amin_cmin_mmin() {
+    #[tokio::test]
+    async fn find_amin_cmin_mmin() {
         let args = ["-amin", "-cmin", "-mmin"];
         let times = ["-60", "-120", "-240", "+60", "+120", "+240"];
 
         for arg in args {
             for time in times {
-                let deps = FakeDependencies::new();
-                let rc = find_main(&["find", "./test_data/simple/subdir", arg, time], &deps);
+                let deps = Box::new(FakeDependencies::new());
+                let rc = find_main(&["find", "./test_data/simple/subdir", arg, time], deps);
 
                 assert_eq!(rc, 0);
             }
         }
     }
 
-    #[test]
-    fn find_size() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn find_size() {
+        let deps = Box::new(FakeDependencies::new());
         // only look at files because the "size" of a directory is a system (and filesystem)
         // dependent thing and we want these tests to be universal.
         let rc = find_main(
@@ -973,7 +973,7 @@ mod tests {
                 "-size",
                 "1b",
             ],
-            &deps,
+            deps,
         );
 
         assert_eq!(rc, 0);
@@ -982,21 +982,21 @@ mod tests {
             fix_up_slashes("./test_data/size/512bytes\n")
         );
 
-        let deps = FakeDependencies::new();
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &["find", "./test_data/size", "-type", "f", "-size", "+1b"],
-            &deps,
+            deps,
         );
 
         assert_eq!(rc, 0);
         assert_eq!(deps.get_output_as_string(), "");
     }
 
-    #[test]
-    fn find_name_links() {
+    #[tokio::test]
+    async fn find_name_links() {
         create_file_link();
 
-        let deps = FakeDependencies::new();
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &[
                 "find",
@@ -1004,7 +1004,7 @@ mod tests {
                 "-name",
                 "abbbc",
             ],
-            &deps,
+            deps,
         );
 
         assert_eq!(rc, 0);
@@ -1014,11 +1014,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn find_lname_links() {
+    #[tokio::test]
+    async fn find_lname_links() {
         create_file_link();
 
-        let deps = FakeDependencies::new();
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &[
                 "find",
@@ -1027,7 +1027,7 @@ mod tests {
                 "abbbc",
                 "-sorted",
             ],
-            &deps,
+            deps,
         );
 
         assert_eq!(rc, 0);
@@ -1037,11 +1037,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn find_ilname_links() {
+    #[tokio::test]
+    async fn find_ilname_links() {
         create_file_link();
 
-        let deps = FakeDependencies::new();
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &[
                 "find",
@@ -1049,7 +1049,7 @@ mod tests {
                 "-ilname",
                 "abBbc",
             ],
-            &deps,
+            deps,
         );
 
         assert_eq!(rc, 0);
@@ -1059,9 +1059,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn find_print_then_quit() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn find_print_then_quit() {
+        let deps = Box::new(FakeDependencies::new());
 
         let rc = find_main(
             &[
@@ -1071,7 +1071,7 @@ mod tests {
                 "-print",
                 "-quit",
             ],
-            &deps,
+            deps,
         );
 
         assert_eq!(rc, 0);
@@ -1081,8 +1081,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_find_newer_xy_all_args() {
+    #[tokio::test]
+    async fn test_find_newer_xy_all_args() {
         // 1. The t parameter is not allowed at the X position.
         // 2. Current Linux filesystem do not support Birthed Time queries,
         //    so the B parameter will be excluded in linux.
@@ -1098,7 +1098,7 @@ mod tests {
         for &x in &x_options {
             for &y in &y_options {
                 let arg = &format!("-newer{x}{y}").to_string();
-                let deps = FakeDependencies::new();
+                let deps = Box::new(FakeDependencies::new());
                 let rc = find_main(
                     &[
                         "find",
@@ -1106,13 +1106,13 @@ mod tests {
                         arg,
                         "./test_data/simple/subdir/ABBBC",
                     ],
-                    &deps,
+                    deps,
                 );
 
                 assert_eq!(rc, 0);
 
                 let arg = &format!("-follow -newer{x}{y}").to_string();
-                let deps = FakeDependencies::new();
+                let deps = Box::new(FakeDependencies::new());
                 let rc = find_main(
                     &[
                         "find",
@@ -1120,7 +1120,7 @@ mod tests {
                         arg,
                         "./test_data/simple/subdir/ABBBC",
                     ],
-                    &deps,
+                    deps,
                 );
 
                 assert_eq!(rc, 0);
@@ -1128,13 +1128,13 @@ mod tests {
         }
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(target_os = "linux")]
-    fn test_find_newer_xy_have_not_birthed_time_filesystem() {
+    async fn test_find_newer_xy_have_not_birthed_time_filesystem() {
         let y_options = ["a", "c", "m"];
         for &y in &y_options {
             let arg = &format!("-newerB{y}").to_string();
-            let deps = FakeDependencies::new();
+            let deps = Box::new(FakeDependencies::new());
             let rc = find_main(
                 &[
                     "find",
@@ -1142,7 +1142,7 @@ mod tests {
                     arg,
                     "./test_data/simple/subdir/ABBBC",
                 ],
-                &deps,
+                deps,
             );
 
             assert_eq!(rc, 1);
@@ -1150,8 +1150,8 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn test_find_newer_xy_before_changed_time() {
+    #[tokio::test]
+    async fn test_find_newer_xy_before_changed_time() {
         // normal - before the changed time
         #[cfg(target_os = "linux")]
         let args = ["-newerat", "-newerct", "-newermt"];
@@ -1161,8 +1161,8 @@ mod tests {
 
         for arg in args {
             for time in times {
-                let deps = FakeDependencies::new();
-                let rc = find_main(&["find", "./test_data/simple/subdir", arg, time], &deps);
+                let deps = Box::new(FakeDependencies::new());
+                let rc = find_main(&["find", "./test_data/simple/subdir", arg, time], deps);
 
                 assert_eq!(rc, 0);
                 assert!(deps
@@ -1173,8 +1173,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_find_newer_xy_after_changed_time() {
+    #[tokio::test]
+    async fn test_find_newer_xy_after_changed_time() {
         // normal - after the changed time
         #[cfg(target_os = "linux")]
         let args = ["-newerat", "-newerct", "-newermt"];
@@ -1184,8 +1184,8 @@ mod tests {
 
         for arg in args {
             for time in times {
-                let deps = FakeDependencies::new();
-                let rc = find_main(&["find", "./test_data/simple/subdir", arg, time], &deps);
+                let deps = Box::new(FakeDependencies::new());
+                let rc = find_main(&["find", "./test_data/simple/subdir", arg, time], deps);
 
                 assert_eq!(rc, 0);
                 assert_eq!(deps.get_output_as_string(), "");
@@ -1193,8 +1193,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_find_newer_xy_empty_time_parameter() {
+    #[tokio::test]
+    async fn test_find_newer_xy_empty_time_parameter() {
         // When an empty time parameter is passed in,
         // the program will use 00:00 of the current day as the default time.
         // Therefore, the files checkout of the git repository while
@@ -1206,8 +1206,8 @@ mod tests {
         let time = "";
 
         for &arg in &args {
-            let deps = FakeDependencies::new();
-            let rc = find_main(&["find", "./test_data/simple/subdir", arg, time], &deps);
+            let deps = Box::new(FakeDependencies::new());
+            let rc = find_main(&["find", "./test_data/simple/subdir", arg, time], deps);
 
             assert_eq!(rc, 0);
             // Output comparison has been temporarily removed to account for the possibility that
@@ -1215,8 +1215,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_find_newer_xy_error_time() {
+    #[tokio::test]
+    async fn test_find_newer_xy_error_time() {
         // Catch a parsing error.
         #[cfg(target_os = "linux")]
         let args = ["-newerat", "-newerct", "-newermt"];
@@ -1225,16 +1225,16 @@ mod tests {
         let time = "2037, jan 01";
 
         for &arg in &args {
-            let deps = FakeDependencies::new();
-            let rc = find_main(&["find", "./test_data/simple/subdir", arg, time], &deps);
+            let deps = Box::new(FakeDependencies::new());
+            let rc = find_main(&["find", "./test_data/simple/subdir", arg, time], deps);
 
             assert_eq!(rc, 1);
         }
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(target_os = "linux")]
-    fn test_no_permission_file_error() {
+    async fn test_no_permission_file_error() {
         use std::{path::Path, process::Command};
 
         let path = Path::new("./test_data/no_permission");
@@ -1248,8 +1248,8 @@ mod tests {
             .output()
             .expect("cannot set file permission");
 
-        let deps = FakeDependencies::new();
-        let rc = find_main(&["find", "./test_data/no_permission"], &deps);
+        let deps = Box::new(FakeDependencies::new());
+        let rc = find_main(&["find", "./test_data/no_permission"], deps);
 
         assert_eq!(rc, 1);
 
@@ -1264,9 +1264,9 @@ mod tests {
         }
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(target_os = "linux")]
-    fn test_user_predicate() {
+    async fn test_user_predicate() {
         use std::{os::unix::fs::MetadataExt, path::Path};
 
         use nix::unistd::{Uid, User};
@@ -1275,10 +1275,10 @@ mod tests {
         let uid = path.metadata().unwrap().uid();
         let user = User::from_uid(Uid::from_raw(uid)).unwrap().unwrap().name;
 
-        let deps = FakeDependencies::new();
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &["find", "./test_data/simple/subdir", "-user", &user],
-            &deps,
+            deps,
         );
 
         assert_eq!(rc, 0);
@@ -1289,17 +1289,17 @@ mod tests {
 
         // test uid
         for arg in ["-uid", "-user"] {
-            let deps = FakeDependencies::new();
+            let deps = Box::new(FakeDependencies::new());
             let rc = find_main(
                 &["find", "./test_data/simple/subdir", arg, &uid.to_string()],
-                &deps,
+                deps,
             );
             assert_eq!(rc, 0);
         }
 
         // test -uid +N, -uid -N
         if uid > 0 {
-            let deps = FakeDependencies::new();
+            let deps = Box::new(FakeDependencies::new());
             let rc = find_main(
                 &[
                     "find",
@@ -1309,7 +1309,7 @@ mod tests {
                     "-uid",
                     &format!("-{}", uid + 1),
                 ],
-                &deps,
+                deps,
             );
             assert_eq!(rc, 0);
             assert_eq!(
@@ -1319,42 +1319,42 @@ mod tests {
         }
 
         // test empty uid
-        let deps = FakeDependencies::new();
-        let rc = find_main(&["find", "./test_data/simple/subdir", "-uid", ""], &deps);
+        let deps = Box::new(FakeDependencies::new());
+        let rc = find_main(&["find", "./test_data/simple/subdir", "-uid", ""], deps);
         assert_eq!(rc, 1);
 
         // test not a number
-        let deps = FakeDependencies::new();
-        let rc = find_main(&["find", "./test_data/simple/subdir", "-uid", "a"], &deps);
+        let deps = Box::new(FakeDependencies::new());
+        let rc = find_main(&["find", "./test_data/simple/subdir", "-uid", "a"], deps);
         assert_eq!(rc, 1);
 
         // test empty user name
         ["-user", "-nouser"].iter().for_each(|&arg| {
-            let deps = FakeDependencies::new();
-            let rc = find_main(&["find", "./test_data/simple/subdir", arg, ""], &deps);
+            let deps = Box::new(FakeDependencies::new());
+            let rc = find_main(&["find", "./test_data/simple/subdir", arg, ""], deps);
 
             assert_eq!(rc, 1);
 
-            let deps = FakeDependencies::new();
-            let rc = find_main(&["find", "./test_data/simple/subdir", arg, " "], &deps);
+            let deps = Box::new(FakeDependencies::new());
+            let rc = find_main(&["find", "./test_data/simple/subdir", arg, " "], deps);
 
             assert_eq!(rc, 1);
         });
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(target_os = "linux")]
-    fn test_nouser_predicate() {
-        let deps = FakeDependencies::new();
-        let rc = find_main(&["find", "./test_data/simple/subdir", "-nouser"], &deps);
+    async fn test_nouser_predicate() {
+        let deps = Box::new(FakeDependencies::new());
+        let rc = find_main(&["find", "./test_data/simple/subdir", "-nouser"], deps);
 
         assert_eq!(rc, 0);
         assert_eq!(deps.get_output_as_string(), "");
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(target_os = "linux")]
-    fn test_group_predicate() {
+    async fn test_group_predicate() {
         use std::{os::unix::fs::MetadataExt, path::Path};
 
         use nix::unistd::{Gid, Group};
@@ -1363,10 +1363,10 @@ mod tests {
         let gid = path.metadata().unwrap().gid();
         let group = Group::from_gid(Gid::from_raw(gid)).unwrap().unwrap().name;
 
-        let deps = FakeDependencies::new();
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &["find", "./test_data/simple/subdir", "-group", &group],
-            &deps,
+            deps,
         );
 
         assert_eq!(rc, 0);
@@ -1377,17 +1377,17 @@ mod tests {
 
         // test gid
         for arg in ["-gid", "-group"] {
-            let deps = FakeDependencies::new();
+            let deps = Box::new(FakeDependencies::new());
             let rc = find_main(
                 &["find", "./test_data/simple/subdir", arg, &gid.to_string()],
-                &deps,
+                deps,
             );
             assert_eq!(rc, 0);
         }
 
         // test -gid +N, -gid -N
         if gid > 0 {
-            let deps = FakeDependencies::new();
+            let deps = Box::new(FakeDependencies::new());
             let rc = find_main(
                 &[
                     "find",
@@ -1397,7 +1397,7 @@ mod tests {
                     "-gid",
                     &format!("-{}", gid + 1),
                 ],
-                &deps,
+                deps,
             );
             assert_eq!(rc, 0);
             assert_eq!(
@@ -1407,42 +1407,42 @@ mod tests {
         }
 
         // test empty gid
-        let deps = FakeDependencies::new();
-        let rc = find_main(&["find", "./test_data/simple/subdir", "-gid", ""], &deps);
+        let deps = Box::new(FakeDependencies::new());
+        let rc = find_main(&["find", "./test_data/simple/subdir", "-gid", ""], deps);
         assert_eq!(rc, 1);
 
         // test not a number
-        let deps = FakeDependencies::new();
-        let rc = find_main(&["find", "./test_data/simple/subdir", "-gid", "a"], &deps);
+        let deps = Box::new(FakeDependencies::new());
+        let rc = find_main(&["find", "./test_data/simple/subdir", "-gid", "a"], deps);
         assert_eq!(rc, 1);
 
         // test empty user name and group name
         ["-group", "-nogroup"].iter().for_each(|&arg| {
-            let deps = FakeDependencies::new();
-            let rc = find_main(&["find", "./test_data/simple/subdir", arg, ""], &deps);
+            let deps = Box::new(FakeDependencies::new());
+            let rc = find_main(&["find", "./test_data/simple/subdir", arg, ""], deps);
 
             assert_eq!(rc, 1);
 
-            let deps = FakeDependencies::new();
-            let rc = find_main(&["find", "./test_data/simple/subdir", arg, " "], &deps);
+            let deps = Box::new(FakeDependencies::new());
+            let rc = find_main(&["find", "./test_data/simple/subdir", arg, " "], deps);
 
             assert_eq!(rc, 1);
         });
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(target_os = "linux")]
-    fn test_nogroup_predicate() {
-        let deps = FakeDependencies::new();
-        let rc = find_main(&["find", "./test_data/simple/subdir", "-nogroup"], &deps);
+    async fn test_nogroup_predicate() {
+        let deps = Box::new(FakeDependencies::new());
+        let rc = find_main(&["find", "./test_data/simple/subdir", "-nogroup"], deps);
 
         assert_eq!(rc, 0);
         assert_eq!(deps.get_output_as_string(), "");
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(unix)]
-    fn test_fs_matcher() {
+    async fn test_fs_matcher() {
         use crate::find::tests::FakeDependencies;
         use matchers::fs::get_file_system_type;
         use std::cell::RefCell;
@@ -1453,7 +1453,7 @@ mod tests {
         let target_fs_type = get_file_system_type(path, &empty_cache).unwrap();
 
         // should match fs type
-        let deps = FakeDependencies::new();
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &[
                 "find",
@@ -1461,26 +1461,26 @@ mod tests {
                 "-fstype",
                 &target_fs_type,
             ],
-            &deps,
+            deps,
         );
 
         assert_eq!(rc, 0);
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(unix)]
-    fn test_noleaf() {
+    async fn test_noleaf() {
         use crate::find::tests::FakeDependencies;
 
-        let deps = FakeDependencies::new();
-        let rc = find_main(&["find", "./test_data/simple/subdir", "-noleaf"], &deps);
+        let deps = Box::new(FakeDependencies::new());
+        let rc = find_main(&["find", "./test_data/simple/subdir", "-noleaf"], deps);
 
         assert_eq!(rc, 0);
     }
 
-    #[test]
-    fn find_maxdepth_and() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn find_maxdepth_and() {
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &[
                 "find",
@@ -1490,7 +1490,7 @@ mod tests {
                 "-a",
                 "-print",
             ],
-            &deps,
+            deps,
         );
 
         assert_eq!(rc, 0);
@@ -1500,12 +1500,12 @@ mod tests {
         );
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(unix)]
-    fn test_daystart() {
+    async fn test_daystart() {
         use crate::find::tests::FakeDependencies;
 
-        let deps = FakeDependencies::new();
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &[
                 "find",
@@ -1514,13 +1514,13 @@ mod tests {
                 "-mtime",
                 "0",
             ],
-            &deps,
-        );
+            deps,
+        ).await;
 
         assert_eq!(rc, 0);
 
         // twice -daystart should be matched
-        let deps = FakeDependencies::new();
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &[
                 "find",
@@ -1530,18 +1530,18 @@ mod tests {
                 "-mtime",
                 "1",
             ],
-            &deps,
+            deps,
         );
 
         assert_eq!(rc, 0);
     }
 
-    #[test]
-    fn find_fprinter() {
+    #[tokio::test]
+    async fn find_fprinter() {
         let printer = ["fprint", "fprint0"];
 
         for p in &printer {
-            let deps = FakeDependencies::new();
+            let deps = Box::new(FakeDependencies::new());
             let rc = find_main(
                 &[
                     "find",
@@ -1549,7 +1549,7 @@ mod tests {
                     format!("-{p}").as_str(),
                     format!("test_data/find_{p}").as_str(),
                 ],
-                &deps,
+                deps,
             );
             assert_eq!(rc, 0);
 
@@ -1557,21 +1557,21 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_follow() {
-        let deps = FakeDependencies::new();
-        let rc = find_main(&["find", "./test_data/simple", "-follow"], &deps);
+    #[tokio::test]
+    async fn test_follow() {
+        let deps = Box::new(FakeDependencies::new());
+        let rc = find_main(&["find", "./test_data/simple", "-follow"], deps);
         assert_eq!(rc, 0);
     }
 
     #[cfg(unix)]
-    #[test]
-    fn test_h_flag() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn test_h_flag() {
+        let deps = Box::new(FakeDependencies::new());
 
         let rc = find_main(
             &["find", "-H", &fix_up_slashes("./test_data/links/link-d")],
-            &deps,
+            deps,
         );
 
         assert_eq!(rc, 0);
@@ -1585,9 +1585,9 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn test_l_flag() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn test_l_flag() {
+        let deps = Box::new(FakeDependencies::new());
 
         let rc = find_main(
             &[
@@ -1596,7 +1596,7 @@ mod tests {
                 &fix_up_slashes("./test_data/links"),
                 "-sorted",
             ],
-            &deps,
+            deps,
         );
 
         assert_eq!(rc, 1);
@@ -1617,13 +1617,13 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn test_p_flag() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn test_p_flag() {
+        let deps = Box::new(FakeDependencies::new());
 
         let rc = find_main(
             &["find", "-P", &fix_up_slashes("./test_data/links/link-d")],
-            &deps,
+            deps,
         );
 
         assert_eq!(rc, 0);
@@ -1633,9 +1633,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn find_fprintf() {
-        let deps = FakeDependencies::new();
+    #[tokio::test]
+    async fn find_fprintf() {
+        let deps = Box::new(FakeDependencies::new());
         let rc = find_main(
             &[
                 "find",
@@ -1644,18 +1644,18 @@ mod tests {
                 "test_data/find_fprintf",
                 "%h %H %p %P",
             ],
-            &deps,
+            deps,
         );
         assert_eq!(rc, 0);
 
         let _ = fs::remove_file("test_data/find_fprintf");
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(unix)]
-    fn test_ls() {
-        let deps = FakeDependencies::new();
-        let rc = find_main(&["find", "./test_data/simple/subdir", "-ls"], &deps);
+    async fn test_ls() {
+        let deps = Box::new(FakeDependencies::new());
+        let rc = find_main(&["find", "./test_data/simple/subdir", "-ls"], deps);
 
         assert_eq!(rc, 0);
     }
