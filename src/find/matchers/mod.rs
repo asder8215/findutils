@@ -147,7 +147,7 @@ pub struct MatcherIO<'a> {
 }
 
 impl MatcherIO<'_> {
-    pub fn new(deps: &dyn Dependencies) -> MatcherIO<'_> {
+    pub fn new<'a>(deps: &'a dyn Dependencies) -> MatcherIO<'a> {
         MatcherIO {
             should_skip_dir: false,
             exit_code: 0,
@@ -193,7 +193,7 @@ impl MatcherIO<'_> {
 /// is what's being searched for. To a first order approximation, find consists
 /// of building a chain of Matcher objects, and then walking a directory tree,
 /// passing each entry to the chain of Matchers.
-pub trait Matcher: 'static {
+pub trait Matcher: 'static + Send + Sync {
     /// Boxes this matcher as a trait object.
     fn into_box(self) -> Box<dyn Matcher>
     where
@@ -223,6 +223,7 @@ pub trait Matcher: 'static {
     /// blocking calls, I/O etc.)
     fn finished(&self, _matcher_io: &mut MatcherIO) {}
 }
+
 
 impl Matcher for Box<dyn Matcher> {
     fn into_box(self) -> Box<dyn Matcher> {

@@ -13,7 +13,7 @@ async fn main() {
 
     let args = std::env::args().collect::<Vec<String>>();
     let strs: Vec<&str> = args.iter().map(std::convert::AsRef::as_ref).collect();
-    let deps = findutils::find::StandardDependencies::new();
-    let status_code = findutils::find::find_main(&strs, &deps).await;
+    let deps = Box::new(findutils::find::StandardDependencies::new());
+    let status_code = findutils::find::find_main(&strs, deps).await;
     std::process::exit(status_code);
 }

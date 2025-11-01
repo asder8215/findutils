@@ -106,6 +106,9 @@ pub struct MultiExecMatcher {
     command: RefCell<Option<argmax::Command>>,
 }
 
+unsafe impl Send for MultiExecMatcher {}
+unsafe impl Sync for MultiExecMatcher {}
+
 impl MultiExecMatcher {
     pub fn new(
         executable: &str,

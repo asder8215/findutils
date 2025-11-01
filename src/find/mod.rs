@@ -7,11 +7,16 @@
 pub mod matchers;
 
 use matchers::{Follow, WalkEntry};
+use sharded_ringbuf::srb::ShardedRingBuf;
+use tokio::runtime::Handle;
+use tokio::task::yield_now;
 use std::cell::RefCell;
+use std::cmp::min;
 use std::error::Error;
 use std::io::{stderr, stdout, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::SystemTime;
 use walkdir::WalkDir;
 
@@ -54,7 +59,7 @@ impl Default for Config {
 
 /// Trait that encapsulates various dependencies (output, clocks, etc.) that we
 /// might want to fake out for unit tests.
-pub trait Dependencies {
+pub trait Dependencies: Sync + Send {
     fn get_output(&self) -> &RefCell<dyn Write>;
     fn now(&self) -> SystemTime;
 }
@@ -91,12 +96,18 @@ impl Dependencies for StandardDependencies {
     }
 }
 
+unsafe impl Sync for StandardDependencies {}
+unsafe impl Send for StandardDependencies {}
+
 /// The result of parsing the command-line arguments into useful forms.
 struct ParsedInfo {
     matcher: Box<dyn self::matchers::Matcher>,
     paths: Vec<String>,
     config: Config,
 }
+
+unsafe impl Sync for ParsedInfo {}
+unsafe impl Send for ParsedInfo {}
 
 /// Function to generate a `ParsedInfo` from the strings supplied on the command-line.
 fn parse_args(args: &[&str]) -> Result<ParsedInfo, Box<dyn Error>> {
@@ -226,7 +237,7 @@ fn process_dir(
     ret
 }
 
-async fn do_find(args: &[&str], deps: &dyn Dependencies) -> Result<i32, Box<dyn Error>> {
+async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<dyn Error>> {
     let paths_and_matcher = parse_args(args)?;
     if paths_and_matcher.config.help_requested {
         print_help();
@@ -239,6 +250,16 @@ async fn do_find(args: &[&str], deps: &dyn Dependencies) -> Result<i32, Box<dyn 
 
     let mut ret = 0;
     let mut quit = false;
+
+    let handle = Handle::current();
+    let metrics = handle.metrics();
+    let num_workers = metrics.num_workers();
+    let srb = ShardedRingBuf::<Vec<String>>::new_with_enq_num(num_workers * 2, num_workers, 1);
+
+    let config = Arc::new(paths_and_matcher.config);
+    let matcher = Arc::new(paths_and_matcher.matcher);
+    let deps = Arc::new(deps);
+
     for path in paths_and_matcher.paths {
         // let dir_ret = process_dir(
         //     &path,
@@ -253,6 +274,107 @@ async fn do_find(args: &[&str], deps: &dyn Dependencies) -> Result<i32, Box<dyn 
         // if quit {
         //     break;
         // }
+        let (sender, receiver) = kanal::unbounded();
+        let _ = sender.send(path);
+        loop {
+            // when the receiver is empty or if we reached our max depth, 
+            // there are no more directories we need to check
+            if receiver.is_empty() {
+                break;
+            }
+            
+            // to spawn only the exact number of dequeuers needed,
+            // we grab either the minimum of receiver or number of
+            // cores we have as well as use that information to
+            // decide how to distribute the dirs evenly among dequeuers
+            let num_deq = min(receiver.len(), num_workers);
+            let dir_per_deq = receiver.len() / num_deq; 
+            let mut deq_tasks = Vec::with_capacity(num_deq);
+            let mut enq_task = Vec::with_capacity(1);
+
+            for deq_task_i in 0..num_deq {
+                let deq_handle = tokio::spawn({
+                    let srb_clone = srb.clone();
+                    let sender_clone = sender.clone();
+                    let config = config.clone();
+                    let matcher = matcher.clone();
+                    let deps = deps.clone();
+                    async move {
+                        loop {
+                            match srb_clone.dequeue_in_shard(deq_task_i).await {
+                                Some(dirs) => {
+                                    for dir in dirs {
+                                        // what do I want process_dir to do?
+                                        // take a dir path, then match itself and its descendants,
+                                        // collect any directories into a Vec, and send the directory
+                                        // descendants into the kanal channel
+                                        process_dir(&dir, &config, &**deps, &*matcher, &mut quit);
+                                    }
+                                } 
+                                None => break,
+                            }
+                        }
+                    }
+                    }
+                );
+                deq_tasks.push(deq_handle);
+            }
+
+            {
+
+                let enq_handle = tokio::spawn({
+                    let srb_clone = srb.clone();
+                    let receiver_clone = receiver.clone();
+                    async move {
+                        let mut counter = 0;
+                        let mut shard_ctr = 0; 
+                        let mut dirs = Vec::with_capacity(dir_per_deq);
+                        while let Ok(dir) = receiver_clone.recv() {
+                            if counter != 0 && counter % dir_per_deq == 0 {
+                                let _ = srb_clone.enqueue_in_shard(dirs, shard_ctr % num_deq);
+                                dirs = Vec::with_capacity(dir_per_deq);
+                                dirs.push(dir);
+                                counter += 1;
+                                shard_ctr += 1;
+                            } else {
+                                dirs.push(dir);
+                                counter += 1;
+                            }
+                        }
+                        if !dirs.is_empty() {
+                            let _ = srb_clone.enqueue_in_shard(dirs,shard_ctr % num_deq);
+                        }
+                    }        
+                });
+                enq_task.push(enq_handle);
+            }
+
+            for enq in enq_task {
+                enq.await.unwrap();
+            }
+
+            srb.poison();
+            // necessary for poison
+            let notifier_task = tokio::spawn({
+                let srb_clone = srb.clone();
+                async move {
+                    loop {
+                        for i in 0..num_deq {
+                            srb_clone.notify_dequeuer_in_shard(i % srb_clone.get_num_of_shards());
+                        }
+                        yield_now().await;
+                    }
+                }
+            });
+
+            for deq in deq_tasks {
+                deq.await.unwrap();
+            }
+
+            notifier_task.abort();
+        }
+
+        srb.clear_poison();
     }
 
     Ok(ret)
@@ -314,7 +436,7 @@ fn print_version() {
 /// All main has to do is pass in the command-line args and exit the process
 /// with the exit code. Note that the first string in args is expected to be
 /// the name of the executable.
-pub async fn find_main(args: &[&str], deps: &dyn Dependencies) -> i32 {
+pub async fn find_main(args: &[&str], deps: Box<dyn Dependencies>) -> i32 {
     match do_find(&args[1..], deps).await {
         Ok(ret) => ret,
         Err(e) => {
@@ -361,6 +483,9 @@ mod tests {
         pub output: RefCell<Cursor<Vec<u8>>>,
         now: SystemTime,
     }
+
+    unsafe impl Sync for FakeDependencies {}
+    unsafe impl Send for FakeDependencies {}
 
     impl<'a> FakeDependencies {
         pub fn new() -> Self {

@@ -380,6 +380,9 @@ mod tests {
     /// Matcher that counts its invocations
     struct Counter(Rc<RefCell<u32>>);
 
+    unsafe impl Send for Counter {}
+    unsafe impl Sync for Counter {}
+
     impl Matcher for Counter {
         fn matches(&self, _: &WalkEntry, _: &mut MatcherIO) -> bool {
             *self.0.borrow_mut() += 1;

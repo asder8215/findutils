@@ -77,6 +77,9 @@ pub struct FileSystemMatcher {
     cache: RefCell<Option<Cache>>,
 }
 
+unsafe impl Send for FileSystemMatcher {}
+unsafe impl Sync for FileSystemMatcher {}
+
 impl FileSystemMatcher {
     #[cfg(unix)]
     pub fn new(fs_text: String) -> Self {
