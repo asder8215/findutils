@@ -339,9 +339,12 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                                         // println!("Dir is {dir}");
                                         // SAFETY: this lock is not held across an await point, so this
                                         // is all good!
-                                        if let Some(_) = processed_dirs_clone.read().unwrap().get(&dir) {
-                                            // println!("Dir is {dir}");
-                                            continue;
+
+                                        if matches!(config.follow, Follow::Always) | matches!(config.follow, Follow::Roots) {
+                                            if let Some(_) = processed_dirs_clone.read().unwrap().get(&dir) {
+                                                // println!("Dir is {dir}");
+                                                continue;
+                                            }
                                         }
 
                                         // what do I want process_dir to do?
@@ -358,7 +361,9 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                                         // println!("{:?}", children_dirs);
                                         // SAFETY: this lock is not held across an await point, so this
                                         // is all good and we can officially denote this as visited
-                                        processed_dirs_clone.write().unwrap().insert(dir);
+                                        if matches!(config.follow, Follow::Always) | matches!(config.follow, Follow::Roots) {
+                                            processed_dirs_clone.write().unwrap().insert(dir);
+                                        }
 
                                         // add in any child directories to the sender
                                         for child in children_dirs {
