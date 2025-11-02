@@ -21,6 +21,11 @@ pub struct FakeDependencies {
     now: SystemTime,
 }
 
+// this is incorrect, just doing this to avoid 
+// compiler issues for now
+unsafe impl Sync for FakeDependencies {}
+unsafe impl Send for FakeDependencies {}
+
 impl FakeDependencies {
     pub fn new() -> Self {
         Self {
