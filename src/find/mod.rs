@@ -14,13 +14,14 @@ use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::HashSet;
 use std::error::Error;
-use std::io::{stderr, stdout, Write};
+use std::io::{Stdout, Write, stderr, stdout};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, LazyLock, RwLock};
 use std::time::SystemTime;
 use walkdir::WalkDir;
+use std::iter::IntoIterator;
 
 pub struct Config {
     same_file_system: bool,
@@ -62,13 +63,14 @@ impl Default for Config {
 /// Trait that encapsulates various dependencies (output, clocks, etc.) that we
 /// might want to fake out for unit tests.
 pub trait Dependencies: Sync + Send {
-    fn get_output(&self) -> &RefCell<dyn Write>;
+    // fn get_output(&self) -> &RefCell<dyn Write>;
+    fn get_output(&self) -> Arc<Stdout>;
     fn now(&self) -> SystemTime;
 }
 
 /// Struct that holds the dependencies we use when run as the real executable.
 pub struct StandardDependencies {
-    output: Rc<RefCell<dyn Write>>,
+    output: Arc<Stdout>,
     now: SystemTime,
 }
 
@@ -76,7 +78,8 @@ impl StandardDependencies {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            output: Rc::new(RefCell::new(stdout())),
+            // output: Rc::new(RefCell::new(stdout())),
+            output: Arc::new(stdout()),
             now: SystemTime::now(),
         }
     }
@@ -89,8 +92,9 @@ impl Default for StandardDependencies {
 }
 
 impl Dependencies for StandardDependencies {
-    fn get_output(&self) -> &RefCell<dyn Write> {
-        self.output.as_ref()
+    // fn get_output(&self) -> &RefCell<dyn Write> {
+    fn get_output(&self) -> Arc<Stdout> {
+        Arc::clone(&self.output)
     }
 
     fn now(&self) -> SystemTime {
@@ -100,6 +104,10 @@ impl Dependencies for StandardDependencies {
 
 unsafe impl Sync for StandardDependencies {}
 unsafe impl Send for StandardDependencies {}
+
+static PROCESSED_DIRS: LazyLock<RwLock<HashSet<String>>> = LazyLock::new(|| RwLock::new(HashSet::new()));
+#[global_allocator]
+static A: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 /// The result of parsing the command-line arguments into useful forms.
 struct ParsedInfo {
@@ -167,7 +175,9 @@ fn parse_args(args: &[&str]) -> Result<ParsedInfo, Box<dyn Error>> {
 }
 
 fn process_dir(
-    dir: &str,
+    // dir: &str,
+    // dirs: Vec<String>,
+    dirs: impl IntoIterator<Item = String>,
     config: &Config,
     deps: &dyn Dependencies,
     matcher: &dyn matchers::Matcher,
@@ -175,80 +185,96 @@ fn process_dir(
     dir_ret: &AtomicI32,
     depth: usize,
 ) -> Vec<WalkEntry> {
-    let mut walkdir = WalkDir::new(dir)
-        .contents_first(config.depth_first)
-        .max_depth(depth)
-        .min_depth(depth)
-        .same_file_system(config.same_file_system)
-        .follow_links(config.follow == Follow::Always)
-        .follow_root_links(config.follow != Follow::Never);
-    if config.sorted_output {
-        walkdir = walkdir.sort_by(|a, b| a.file_name().cmp(b.file_name()));
-    }
-
-    let mut ret = 0;
-
     let mut children_dirs = Vec::new();
-
-    // Slightly yucky loop handling here :-(. See docs for
-    // WalkDirIterator::skip_current_dir for explanation.
-    let mut it = walkdir.into_iter();
-    // As WalkDir seems not providing a function to check its stack,
-    // using current_dir is a workaround to check leaving directory.
-    let mut current_dir: Option<PathBuf> = None;
-    while let Some(result) = it.next() {
-        match WalkEntry::from_walkdir(result, config.follow) {
-            Err(err) => {
-                ret = 1;
-                writeln!(&mut stderr(), "Error: {err}").unwrap();
+    let mut ret = 0;
+    for dir in dirs {
+        // SAFETY: this lock is not held across an await point, so this
+        // is all good!
+        if matches!(config.follow, Follow::Always) | matches!(config.follow, Follow::Roots) {
+            if let Some(_) = PROCESSED_DIRS.read().unwrap().get(&dir) {
+                // println!("Dir is {dir}");
+                continue;
             }
-            Ok(entry) => {
-                let mut matcher_io = matchers::MatcherIO::new(deps);
+        }
+    
+        let mut walkdir = WalkDir::new(&dir)
+            .contents_first(config.depth_first)
+            .max_depth(depth)
+            .min_depth(depth)
+            .same_file_system(config.same_file_system)
+            .follow_links(config.follow == Follow::Always)
+            .follow_root_links(config.follow != Follow::Never);
+        if config.sorted_output {
+            walkdir = walkdir.sort_by(|a, b| a.file_name().cmp(b.file_name()));
+        }
 
-                let new_dir = entry.path().parent().map(|x| x.to_path_buf());
-                if new_dir != current_dir {
-                    if let Some(dir) = current_dir.take() {
-                        matcher.finished_dir(dir.as_path(), &mut matcher_io);
+        // Slightly yucky loop handling here :-(. See docs for
+        // WalkDirIterator::skip_current_dir for explanation.
+        let mut it = walkdir.into_iter();
+        // As WalkDir seems not providing a function to check its stack,
+        // using current_dir is a workaround to check leaving directory.
+        let mut current_dir: Option<PathBuf> = None;
+        // let mut matcher_io = matchers::MatcherIO::new(deps);
+        while let Some(result) = it.next() {
+            match WalkEntry::from_walkdir(result, config.follow) {
+                Err(err) => {
+                    ret = 1;
+                    writeln!(&mut stderr(), "Error: {err}").unwrap();
+                }
+                Ok(entry) => {
+                    let mut matcher_io = matchers::MatcherIO::new(deps);
+
+                    let new_dir = entry.path().parent().map(|x| x.to_path_buf());
+                    if new_dir != current_dir {
+                        if let Some(dir) = current_dir.take() {
+                            matcher.finished_dir(dir.as_path(), &mut matcher_io);
+                        }
+                        current_dir = new_dir;
                     }
-                    current_dir = new_dir;
-                }
-                
-                // println!("Entry is {:?}", &entry);
-                matcher.matches(&entry, &mut matcher_io);
-                match matcher_io.exit_code() {
-                    0 => {}
-                    code => ret = code,
-                }
-                if matcher_io.should_quit() {
-                    *quit = true;
-                    break;
-                }
-                if matcher_io.should_skip_current_dir() {
-                    it.skip_current_dir();
-                }
+                    
+                    // println!("Entry is {:?}", &entry);
+                    matcher.matches(&entry, &mut matcher_io);
+                    match matcher_io.exit_code() {
+                        0 => {}
+                        code => ret = code,
+                    }
+                    if matcher_io.should_quit() {
+                        *quit = true;
+                        break;
+                    }
+                    if matcher_io.should_skip_current_dir() {
+                        it.skip_current_dir();
+                    }
 
-                if entry.file_type().is_dir() {
-                    children_dirs.push(entry);
+                    if entry.file_type().is_dir() {
+                        children_dirs.push(entry);
+                    }
                 }
             }
         }
-    }
 
-    let mut matcher_io = matchers::MatcherIO::new(deps);
-    if let Some(dir) = current_dir.take() {
-        matcher.finished_dir(dir.as_path(), &mut matcher_io);
-    }
-    matcher.finished(&mut matcher_io);
-    // This is implemented for exec +.
-    match matcher_io.exit_code() {
-        0 => {}
-        code => ret = code,
-    }
+        let mut matcher_io = matchers::MatcherIO::new(deps);
+        if let Some(dir) = current_dir.take() {
+            matcher.finished_dir(dir.as_path(), &mut matcher_io);
+        }
+        matcher.finished(&mut matcher_io);
+        // This is implemented for exec +.
+        match matcher_io.exit_code() {
+            0 => {}
+            code => ret = code,
+        }
 
-    if dir_ret.load(Ordering::Relaxed) != 0 {
-        dir_ret.store(ret, Ordering::Relaxed);
+        if dir_ret.load(Ordering::Relaxed) != 0 {
+            dir_ret.store(ret, Ordering::Relaxed);
+        }
+        // ret
+
+        // SAFETY: this lock is not held across an await point, so this
+        // is all good and we can officially denote this as visited
+        if matches!(config.follow, Follow::Always) | matches!(config.follow, Follow::Roots) {
+            PROCESSED_DIRS.write().unwrap().insert(dir);
+        }
     }
-    // ret
     children_dirs
 }
 
@@ -270,7 +296,7 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
     let metrics = handle.metrics();
     let num_workers = metrics.num_workers();
     let srb = ShardedRingBuf::<Vec<String>>::new_with_enq_num(num_workers * 2, num_workers, 1);
-    let processed_dirs = Arc::new(RwLock::new(HashSet::new()));
+    // let processed_dirs = Arc::new(RwLock::new(HashSet::new()));
 
     let config = Arc::new(paths_and_matcher.config);
     let matcher = Arc::new(paths_and_matcher.matcher);
@@ -284,7 +310,7 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
         // let ret_clone = ret.clone();
         let mut depth = 0;
         if depth == config.min_depth {
-            process_dir(&path, &config_clone, &**deps_clone, &*matcher_clone, &mut quit, &ret, 0);
+            process_dir(vec![path.clone()], &config_clone, &**deps_clone, &*matcher_clone, &mut quit, &ret, 0);
         }
         // let dir_ret = process_dir(
         //     &path,
@@ -322,7 +348,6 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
             for deq_task_i in 0..num_deq {
                 let deq_handle = tokio::spawn({
                     let srb_clone = srb.clone();
-                    let processed_dirs_clone = processed_dirs.clone();
                     let sender_clone = sender.clone();
                     let config = config.clone();
                     let matcher = matcher.clone();
@@ -335,17 +360,17 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                                 Some(dirs) => {
                                     // println!("smth");
 
-                                    for dir in dirs {
+                                    // for dir in dirs {
                                         // println!("Dir is {dir}");
                                         // SAFETY: this lock is not held across an await point, so this
                                         // is all good!
 
-                                        if matches!(config.follow, Follow::Always) | matches!(config.follow, Follow::Roots) {
-                                            if let Some(_) = processed_dirs_clone.read().unwrap().get(&dir) {
-                                                // println!("Dir is {dir}");
-                                                continue;
-                                            }
-                                        }
+                                        // if matches!(config.follow, Follow::Always) | matches!(config.follow, Follow::Roots) {
+                                        //     if let Some(_) = processed_dirs_clone.read().unwrap().get(&dir) {
+                                        //         // println!("Dir is {dir}");
+                                        //         continue;
+                                        //     }
+                                        // }
 
                                         // what do I want process_dir to do?
                                         // take a dir path, then match itself and its descendants,
@@ -353,29 +378,19 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                                         // descendants into the kanal channel
                                         let children_dirs: Vec<WalkEntry>;
                                         if depth == 0 && config.min_depth != 0 { 
-                                            children_dirs = process_dir(&dir, &config, &**deps, &*matcher, &mut quit, &ret_clone, config.min_depth);
+                                            // children_dirs = process_dir(&dir, &config, &**deps, &*matcher, &mut quit, &ret_clone, config.min_depth);
+                                            children_dirs = process_dir(dirs, &config, &**deps, &*matcher, &mut quit, &ret_clone, config.min_depth);
                                         } else {
-                                            children_dirs = process_dir(&dir, &config, &**deps, &*matcher, &mut quit, &ret_clone, 1);
-                                        }
-
-                                        // println!("{:?}", children_dirs);
-                                        // SAFETY: this lock is not held across an await point, so this
-                                        // is all good and we can officially denote this as visited
-                                        if matches!(config.follow, Follow::Always) | matches!(config.follow, Follow::Roots) {
-                                            processed_dirs_clone.write().unwrap().insert(dir);
+                                            // children_dirs = process_dir(&dir, &config, &**deps, &*matcher, &mut quit, &ret_clone, 1);
+                                            children_dirs = process_dir(dirs, &config, &**deps, &*matcher, &mut quit, &ret_clone, 1);
                                         }
 
                                         // add in any child directories to the sender
                                         for child in children_dirs {
-                                            // println!("smth");
-                                            // println!("{:?}", )
                                             let _ = sender_clone.send(child.into_path().to_string_lossy().into_owned());
-                                            // println!("{:?}", res);
                                         }
-                                    }
                                 } 
                                 None => {
-                                    // println!("smth");
                                     break
                                 },
                             }
@@ -387,7 +402,6 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
             }
 
             {
-                // println!("hello?");
                 let enq_handle = tokio::spawn({
                     let srb_clone = srb.clone();
                     let receiver_clone = receiver.clone();
@@ -395,17 +409,9 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                         let mut counter = 0;
                         let mut shard_ctr = 0; 
                         let mut dirs = Vec::with_capacity(dir_per_deq);
-                        // loop {
-                            // println!("smth");
-                        // if receiver_clone.is_empty() {
-                        //     // println!("here");
-                        //     break;
-                        // }
-
                         let len = receiver_clone.len();
                         let mut recv_count = 0;
 
-                        // println!("receiver has {len} items");
                         while recv_count < len {
                             if let Ok(dir) = receiver_clone.recv() {
                                 if counter != 0 && counter % dir_per_deq == 0 {
@@ -421,7 +427,6 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                                 recv_count += 1;
                             }
                         }
-                        // }
                         if !dirs.is_empty() {
                             let _ = srb_clone.enqueue_in_shard(dirs,shard_ctr % num_deq).await;
                         }
@@ -435,6 +440,7 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
             }
 
             srb.poison();
+
             // necessary for poison
             let notifier_task = tokio::spawn({
                 let srb_clone = srb.clone();
@@ -604,8 +610,9 @@ mod tests {
     }
 
     impl Dependencies for FakeDependencies {
-        fn get_output(&self) -> &RefCell<dyn Write> {
-            &self.output
+        fn get_output(&self) -> Arc<Stdout> {
+            // TODO: need to change this 
+            Arc::new(stdout())
         }
 
         fn now(&self) -> SystemTime {

@@ -47,59 +47,59 @@ impl FakeDependencies {
     }
 }
 
-impl Dependencies for FakeDependencies {
-    fn get_output(&self) -> &RefCell<dyn Write> {
-        &self.output
-    }
+// impl Dependencies for FakeDependencies {
+//     fn get_output(&self) -> &RefCell<dyn Write> {
+//         &self.output
+//     }
 
-    fn now(&self) -> SystemTime {
-        self.now
-    }
-}
+//     fn now(&self) -> SystemTime {
+//         self.now
+//     }
+// }
 
-pub fn path_to_testing_commandline() -> String {
-    let mut path_to_use = env::current_exe()
-        // this will be something along the lines of /my/homedir/findutils/target/debug/deps/findutils-5532804878869ef1
-        .expect("can't find path of this executable")
-        .parent()
-        .expect("can't find parent directory of this executable")
-        .to_path_buf();
-    // and we want /my/homedir/findutils/target/debug/testing-commandline
-    if path_to_use.ends_with("deps") {
-        path_to_use.pop();
-    }
-    path_to_use = path_to_use.join("testing-commandline");
-    path_to_use.to_string_lossy().to_string()
-}
+// pub fn path_to_testing_commandline() -> String {
+//     let mut path_to_use = env::current_exe()
+//         // this will be something along the lines of /my/homedir/findutils/target/debug/deps/findutils-5532804878869ef1
+//         .expect("can't find path of this executable")
+//         .parent()
+//         .expect("can't find parent directory of this executable")
+//         .to_path_buf();
+//     // and we want /my/homedir/findutils/target/debug/testing-commandline
+//     if path_to_use.ends_with("deps") {
+//         path_to_use.pop();
+//     }
+//     path_to_use = path_to_use.join("testing-commandline");
+//     path_to_use.to_string_lossy().to_string()
+// }
 
-#[cfg(windows)]
-/// A copy of find::tests::fix_up_slashes.
-/// TODO: find out how to share #[cfg(test)] functions/structs between unit
-/// and integration tests.
-pub fn fix_up_slashes(path: &str) -> String {
-    path.replace("/", "\\")
-}
+// #[cfg(windows)]
+// /// A copy of find::tests::fix_up_slashes.
+// /// TODO: find out how to share #[cfg(test)] functions/structs between unit
+// /// and integration tests.
+// pub fn fix_up_slashes(path: &str) -> String {
+//     path.replace("/", "\\")
+// }
 
-#[cfg(not(windows))]
-pub fn fix_up_slashes(path: &str) -> String {
-    path.to_string()
-}
+// #[cfg(not(windows))]
+// pub fn fix_up_slashes(path: &str) -> String {
+//     path.to_string()
+// }
 
-/// A copy of `find::matchers::tests::get_dir_entry_for`.
-/// TODO: find out how to share #[cfg(test)] functions/structs between unit
-/// and integration tests.
-pub fn get_dir_entry_for(root: &str, path: &str) -> WalkEntry {
-    let root = fix_up_slashes(root);
-    let root = Path::new(&root);
+// /// A copy of `find::matchers::tests::get_dir_entry_for`.
+// /// TODO: find out how to share #[cfg(test)] functions/structs between unit
+// /// and integration tests.
+// pub fn get_dir_entry_for(root: &str, path: &str) -> WalkEntry {
+//     let root = fix_up_slashes(root);
+//     let root = Path::new(&root);
 
-    let path = fix_up_slashes(path);
-    let path = if path.is_empty() {
-        root.to_owned()
-    } else {
-        root.join(path)
-    };
+//     let path = fix_up_slashes(path);
+//     let path = if path.is_empty() {
+//         root.to_owned()
+//     } else {
+//         root.join(path)
+//     };
 
-    let depth = path.components().count() - root.components().count();
+//     let depth = path.components().count() - root.components().count();
 
-    WalkEntry::new(path, depth, Follow::Never)
-}
+//     WalkEntry::new(path, depth, Follow::Never)
+// }

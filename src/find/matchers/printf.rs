@@ -627,7 +627,8 @@ impl Matcher for Printf {
         if let Some(file) = &self.output_file {
             self.print(file_info, file);
         } else {
-            self.print(file_info, &mut *matcher_io.deps.get_output().borrow_mut());
+            // self.print(file_info, &mut *matcher_io.deps.get_output().borrow_mut());
+            self.print(file_info, &mut matcher_io.deps.get_output().lock());
         }
 
         true

@@ -273,7 +273,8 @@ impl Matcher for Ls {
             self.print(
                 file_info,
                 matcher_io,
-                &mut *matcher_io.deps.get_output().borrow_mut(),
+                // &mut *matcher_io.deps.get_output().borrow_mut(),
+                &mut matcher_io.deps.get_output().lock(),
                 false,
             );
         }
