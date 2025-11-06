@@ -5,7 +5,7 @@
 // https://opensource.org/licenses/MIT.
 
 use std::fs::File;
-use std::io::{stderr, Write};
+use std::io::{Error, Write, stderr};
 
 use super::{Matcher, MatcherIO, WalkEntry};
 
@@ -50,8 +50,9 @@ impl Printer {
             file_info.path().to_string_lossy(),
             self.delimiter
         ) {
-            Ok(_) => {}
+            Ok(_) => {},
             Err(e) => {
+                out.flush().unwrap();
                 if print_error_message {
                     writeln!(
                         &mut stderr(),
@@ -64,7 +65,7 @@ impl Printer {
                 }
             }
         }
-        out.flush().unwrap();
+        // out.flush().unwrap();
     }
 }
 
@@ -73,11 +74,13 @@ impl Matcher for Printer {
         if let Some(file) = &self.output_file {
             self.print(file_info, matcher_io, file, true);
         } else {
+
+            // let buf_writer = matcher_io.deps.get_output();
             self.print(
                 file_info,
                 matcher_io,
                 // &mut *matcher_io.deps.get_output().borrow_mut(),
-                &mut matcher_io.deps.get_output().lock(),
+                &mut matcher_io.deps.get_output().get_ref(),
                 false,
             );
         }

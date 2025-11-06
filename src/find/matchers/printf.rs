@@ -628,7 +628,8 @@ impl Matcher for Printf {
             self.print(file_info, file);
         } else {
             // self.print(file_info, &mut *matcher_io.deps.get_output().borrow_mut());
-            self.print(file_info, &mut matcher_io.deps.get_output().lock());
+            // self.print(file_info, &mut matcher_io.deps.get_output().lock());
+            self.print(file_info, &mut matcher_io.deps.get_output().get_ref());
         }
 
         true

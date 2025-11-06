@@ -14,11 +14,11 @@ use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::HashSet;
 use std::error::Error;
-use std::io::{Stdout, Write, stderr, stdout};
+use std::io::{BufWriter, Stdout, Write, stderr, stdout};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
-use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, RwLock};
 use std::time::SystemTime;
 use walkdir::WalkDir;
 use std::iter::IntoIterator;
@@ -64,13 +64,13 @@ impl Default for Config {
 /// might want to fake out for unit tests.
 pub trait Dependencies: Sync + Send {
     // fn get_output(&self) -> &RefCell<dyn Write>;
-    fn get_output(&self) -> Arc<Stdout>;
+    fn get_output(&self) -> Arc<BufWriter<Stdout>>;
     fn now(&self) -> SystemTime;
 }
 
 /// Struct that holds the dependencies we use when run as the real executable.
 pub struct StandardDependencies {
-    output: Arc<Stdout>,
+    output: Arc<BufWriter<Stdout>>,
     now: SystemTime,
 }
 
@@ -79,7 +79,7 @@ impl StandardDependencies {
     pub fn new() -> Self {
         Self {
             // output: Rc::new(RefCell::new(stdout())),
-            output: Arc::new(stdout()),
+            output: Arc::new(BufWriter::with_capacity(8192, stdout())),
             now: SystemTime::now(),
         }
     }
@@ -93,7 +93,7 @@ impl Default for StandardDependencies {
 
 impl Dependencies for StandardDependencies {
     // fn get_output(&self) -> &RefCell<dyn Write> {
-    fn get_output(&self) -> Arc<Stdout> {
+    fn get_output(&self) -> Arc<BufWriter<Stdout>> {
         Arc::clone(&self.output)
     }
 
@@ -106,8 +106,8 @@ unsafe impl Sync for StandardDependencies {}
 unsafe impl Send for StandardDependencies {}
 
 static PROCESSED_DIRS: LazyLock<RwLock<HashSet<String>>> = LazyLock::new(|| RwLock::new(HashSet::new()));
-#[global_allocator]
-static A: jemallocator::Jemalloc = jemallocator::Jemalloc;
+// #[global_allocator]
+// static A: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 /// The result of parsing the command-line arguments into useful forms.
 struct ParsedInfo {
@@ -295,7 +295,7 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
     let handle = Handle::current();
     let metrics = handle.metrics();
     let num_workers = metrics.num_workers();
-    let srb = ShardedRingBuf::<Vec<String>>::new_with_enq_num(num_workers * 2, num_workers, 1);
+    let srb = ShardedRingBuf::<Vec<String>>::new_with_enq_num(num_workers, num_workers, 1);
     // let processed_dirs = Arc::new(RwLock::new(HashSet::new()));
 
     let config = Arc::new(paths_and_matcher.config);
@@ -474,6 +474,8 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
         }
     }
 
+    // let _ = deps.get_output().flush();
+
     Ok(ret.load(Ordering::Relaxed))
 }
 
@@ -610,9 +612,10 @@ mod tests {
     }
 
     impl Dependencies for FakeDependencies {
-        fn get_output(&self) -> Arc<Stdout> {
+        fn get_output(&self) -> Arc<BufWriter<Stdout>> {
             // TODO: need to change this 
-            Arc::new(stdout())
+            Mutex::new(BufWriter::new(stdout())).lock();
+            todo!();
         }
 
         fn now(&self) -> SystemTime {
