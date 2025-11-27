@@ -7,6 +7,7 @@
 pub mod matchers;
 
 use matchers::{Follow, WalkEntry};
+use sharded_ringbuf::cs_srb::{Acquire, CSShardedRingBuf};
 use sharded_ringbuf::srb::ShardedRingBuf;
 use tokio::runtime::Handle;
 use tokio::task::yield_now;
@@ -295,7 +296,8 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
     let handle = Handle::current();
     let metrics = handle.metrics();
     let num_workers = metrics.num_workers();
-    let srb = ShardedRingBuf::<Vec<String>>::new_with_enq_num(num_workers, num_workers, 1);
+    // let srb = ShardedRingBuf::<Vec<String>>::new_with_enq_num(num_workers, num_workers, 1);
+    let srb = CSShardedRingBuf::<Vec<String>>::new_with_enq_num(num_workers, num_workers, 1);
     // let processed_dirs = Arc::new(RwLock::new(HashSet::new()));
 
     let config = Arc::new(paths_and_matcher.config);
@@ -328,7 +330,7 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
         let (sender, receiver) = kanal::unbounded();
         let _ = sender.send(path);
         loop {
-            // println!("something is happening");
+            // println!("sender: {:?}", sender.len());
             // when the receiver is empty or if we reached our max depth, 
             // there are no more directories we need to check
             if depth > config.max_depth || receiver.is_empty() {
@@ -356,8 +358,8 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                     async move {
                         loop {
                             // println!("hello?");
-                            match srb_clone.dequeue_in_shard(deq_task_i).await {
-                                Some(dirs) => {
+                            match srb_clone.acquire_shard_guard(Acquire::Dequeue, deq_task_i).await {
+                                Some(shard_guard) => {
                                     // println!("smth");
 
                                     // for dir in dirs {
@@ -371,7 +373,8 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                                         //         continue;
                                         //     }
                                         // }
-
+                                        let dirs = srb_clone.dequeue_item(shard_guard);
+                                        // println!("{:?}", dirs);
                                         // what do I want process_dir to do?
                                         // take a dir path, then match itself and its descendants,
                                         // collect any directories into a Vec, and send the directory
@@ -414,8 +417,10 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
 
                         while recv_count < len {
                             if let Ok(dir) = receiver_clone.recv() {
+                                // println!("{dir}");
                                 if counter != 0 && counter % dir_per_deq == 0 {
-                                    let _ = srb_clone.enqueue_in_shard(dirs, shard_ctr % num_deq).await;
+                                    let shard_guard = srb_clone.acquire_shard_guard(Acquire::Enqueue, shard_ctr % num_deq).await.unwrap();
+                                    srb_clone.enqueue_item(dirs, shard_guard);
                                     dirs = Vec::with_capacity(dir_per_deq);
                                     dirs.push(dir);
                                     counter += 1;
@@ -428,7 +433,8 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                             }
                         }
                         if !dirs.is_empty() {
-                            let _ = srb_clone.enqueue_in_shard(dirs,shard_ctr % num_deq).await;
+                            let shard_guard = srb_clone.acquire_shard_guard(Acquire::Enqueue, shard_ctr % num_deq).await.unwrap();
+                            srb_clone.enqueue_item(dirs, shard_guard);
                         }
                     }        
                 });

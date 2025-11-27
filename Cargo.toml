@@ -20,7 +20,7 @@ uucore = { version = "0.2.2", features = ["entries", "fs", "fsext", "mode"] }
 nix = { version = "0.30", features = ["fs", "user"] }
 argmax = "0.4.0"
 tokio = {version = "1.48.0", features = ["macros", "rt-multi-thread"]}
-sharded_ringbuf = "0.3.0"
+sharded_ringbuf = "0.4.5"
 kanal = "0.1.1"
 
 [dev-dependencies]
