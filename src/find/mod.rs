@@ -7,8 +7,7 @@
 pub mod matchers;
 
 use matchers::{Follow, WalkEntry};
-use sharded_ringbuf::cs_srb::{Acquire, CSShardedRingBuf};
-use sharded_ringbuf::srb::ShardedRingBuf;
+use sharded_ringbuf::cs_srb::{CSShardedRingBuf};
 use tokio::runtime::Handle;
 use tokio::task::yield_now;
 use std::cell::RefCell;
@@ -358,8 +357,8 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                     async move {
                         loop {
                             // println!("hello?");
-                            match srb_clone.acquire_shard_guard(Acquire::Dequeue, deq_task_i).await {
-                                Some(shard_guard) => {
+                            match srb_clone.dequeue_in_shard(deq_task_i).await {
+                                Some(dirs) => {
                                     // println!("smth");
 
                                     // for dir in dirs {
@@ -373,7 +372,7 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                                         //         continue;
                                         //     }
                                         // }
-                                        let dirs = srb_clone.dequeue_item(shard_guard);
+                                        // let dirs = srb_clone.dequeue_item(shard_guard);
                                         // println!("{:?}", dirs);
                                         // what do I want process_dir to do?
                                         // take a dir path, then match itself and its descendants,
@@ -392,6 +391,7 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                                         for child in children_dirs {
                                             let _ = sender_clone.send(child.into_path().to_string_lossy().into_owned());
                                         }
+                                    // }
                                 } 
                                 None => {
                                     break
@@ -419,8 +419,8 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                             if let Ok(dir) = receiver_clone.recv() {
                                 // println!("{dir}");
                                 if counter != 0 && counter % dir_per_deq == 0 {
-                                    let shard_guard = srb_clone.acquire_shard_guard(Acquire::Enqueue, shard_ctr % num_deq).await.unwrap();
-                                    srb_clone.enqueue_item(dirs, shard_guard);
+                                    let shard_guard = srb_clone.enqueue_guard_in_shard(shard_ctr % num_deq).await.unwrap();
+                                    srb_clone.enqueue(dirs, shard_guard);
                                     dirs = Vec::with_capacity(dir_per_deq);
                                     dirs.push(dir);
                                     counter += 1;
@@ -433,8 +433,8 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                             }
                         }
                         if !dirs.is_empty() {
-                            let shard_guard = srb_clone.acquire_shard_guard(Acquire::Enqueue, shard_ctr % num_deq).await.unwrap();
-                            srb_clone.enqueue_item(dirs, shard_guard);
+                            let shard_guard = srb_clone.enqueue_guard_in_shard(shard_ctr % num_deq).await.unwrap();
+                            srb_clone.enqueue(dirs, shard_guard);
                         }
                     }        
                 });
