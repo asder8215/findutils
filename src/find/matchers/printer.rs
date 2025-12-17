@@ -74,7 +74,6 @@ impl Matcher for Printer {
         if let Some(file) = &self.output_file {
             self.print(file_info, matcher_io, file, true);
         } else {
-
             // let buf_writer = matcher_io.deps.get_output();
             self.print(
                 file_info,
