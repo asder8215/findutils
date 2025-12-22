@@ -8,7 +8,7 @@ pub mod matchers;
 
 use matchers::{Follow, WalkEntry};
 use sharded_ringbuf::cs_srb::CSShardedRingBuf;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell, UnsafeCell};
 use std::cmp::{max, min};
 use std::collections::HashSet;
 use std::error::Error;
@@ -279,6 +279,18 @@ fn process_dir(
     children_dirs
 }
 
+/// This is mainly used to let the enqueuer know that we can
+/// check the next depth of directories/nodes (this minimizes
+/// the cost of spawning deq and enq over long depths)
+struct SendDone {
+    done: Cell<bool>
+}
+
+// SAFETY: these are just booleans, we can't get half reads
+// of half write state in here because it's just 1 bit
+unsafe impl Send for SendDone {}
+unsafe impl Sync for SendDone {}
+
 async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<dyn Error>> {
     let paths_and_matcher = parse_args(args)?;
     if paths_and_matcher.config.help_requested {
@@ -337,95 +349,78 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
         // }
         let (sender, receiver) = kanal::unbounded();
         let _ = sender.send(path);
+        
+        // to spawn only the exact number of dequeuers needed,
+        // we grab either the minimum of receiver or number of
+        // cores we have as well as use that information to
+        // decide how to distribute the dirs evenly among dequeuers
+        let num_deq = num_workers;
+        let mut deq_tasks = Vec::with_capacity(num_deq);
+        let done_send: Arc<Vec<_>> = Arc::new((0..num_deq).map(|_| SendDone{done: Cell::new(true)}).collect());
+        
+        for deq_task_i in 0..num_deq {
+            let deq_handle = tokio::spawn({
+                let srb_clone = srb.clone();
+                let sender_clone = sender.clone();
+                let config = config.clone();
+                let matcher = matcher.clone();
+                let deps = deps.clone();
+                let ret_clone = ret.clone();
+                let done_send_clone = done_send.clone();
+                async move {
+                    loop {
+                        match srb_clone.dequeue_in_shard(deq_task_i).await {
+                            Some(dirs) => {
+                                let children_dirs: Vec<WalkEntry>;
+                                if depth == 0 && config.min_depth != 0 {
+                                    children_dirs = process_dir(
+                                        dirs,
+                                        &config,
+                                        &**deps,
+                                        &*matcher,
+                                        &mut quit,
+                                        &ret_clone,
+                                        config.min_depth,
+                                    );
+                                } else {
+                                    children_dirs = process_dir(
+                                        dirs, &config, &**deps, &*matcher, &mut quit,
+                                        &ret_clone, 1,
+                                    );
+                                }
+
+                                // println!("{:?}", children_dirs);
+                                // add in any child directories to the sender
+                                for child in children_dirs {
+                                    let _ = sender_clone
+                                        .send(child.into_path().to_string_lossy().into_owned());
+                                }
+
+                                done_send_clone.get(deq_task_i).unwrap().done.set(true);
+                            }
+                            None => break,
+                        }
+                    }
+                }
+            });
+            deq_tasks.push(deq_handle);
+        }
+
         loop {
-            // println!("sender: {:?}", sender.len());
             // when the receiver is empty or if we reached our max depth,
             // there are no more directories we need to check
             if depth > config.max_depth || receiver.is_empty() {
-                // println!("hello");
                 break;
             }
 
-            // to spawn only the exact number of dequeuers needed,
-            // we grab either the minimum of receiver or number of
-            // cores we have as well as use that information to
-            // decide how to distribute the dirs evenly among dequeuers
-            let num_deq = max(1, min(receiver.len(), num_workers));
-            let dir_per_deq = max(1, receiver.len() / num_deq);
-            let mut deq_tasks = Vec::with_capacity(num_deq);
             let mut enq_task = Vec::with_capacity(1);
 
-            for deq_task_i in 0..num_deq {
-                let deq_handle = tokio::spawn({
-                    let srb_clone = srb.clone();
-                    let sender_clone = sender.clone();
-                    let config = config.clone();
-                    let matcher = matcher.clone();
-                    let deps = deps.clone();
-                    let ret_clone = ret.clone();
-                    async move {
-                        loop {
-                            // println!("hello?");
-                            match srb_clone.dequeue_in_shard(deq_task_i).await {
-                                Some(dirs) => {
-                                    // println!("smth");
-
-                                    // for dir in dirs {
-                                    // println!("Dir is {dir}");
-                                    // SAFETY: this lock is not held across an await point, so this
-                                    // is all good!
-
-                                    // if matches!(config.follow, Follow::Always) | matches!(config.follow, Follow::Roots) {
-                                    //     if let Some(_) = processed_dirs_clone.read().unwrap().get(&dir) {
-                                    //         // println!("Dir is {dir}");
-                                    //         continue;
-                                    //     }
-                                    // }
-                                    // let dirs = srb_clone.dequeue_item(shard_guard);
-                                    // println!("{:?}", dirs);
-                                    // what do I want process_dir to do?
-                                    // take a dir path, then match itself and its descendants,
-                                    // collect any directories into a Vec, and send the directory
-                                    // descendants into the kanal channel
-                                    let children_dirs: Vec<WalkEntry>;
-                                    if depth == 0 && config.min_depth != 0 {
-                                        // children_dirs = process_dir(&dir, &config, &**deps, &*matcher, &mut quit, &ret_clone, config.min_depth);
-                                        children_dirs = process_dir(
-                                            dirs,
-                                            &config,
-                                            &**deps,
-                                            &*matcher,
-                                            &mut quit,
-                                            &ret_clone,
-                                            config.min_depth,
-                                        );
-                                    } else {
-                                        // children_dirs = process_dir(&dir, &config, &**deps, &*matcher, &mut quit, &ret_clone, 1);
-                                        children_dirs = process_dir(
-                                            dirs, &config, &**deps, &*matcher, &mut quit,
-                                            &ret_clone, 1,
-                                        );
-                                    }
-
-                                    // add in any child directories to the sender
-                                    for child in children_dirs {
-                                        let _ = sender_clone
-                                            .send(child.into_path().to_string_lossy().into_owned());
-                                    }
-                                    // }
-                                }
-                                None => break,
-                            }
-                        }
-                    }
-                });
-                deq_tasks.push(deq_handle);
-            }
-
             {
+                let dir_per_deq = max(1, receiver.len() / num_deq);
                 let enq_handle = tokio::spawn({
                     let srb_clone = srb.clone();
                     let receiver_clone = receiver.clone();
+                    let done_send_clone = done_send.clone();
                     async move {
                         let mut counter = 0;
                         let mut shard_ctr = 0;
@@ -435,12 +430,12 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
 
                         while recv_count < len {
                             if let Ok(dir) = receiver_clone.recv() {
-                                // println!("{dir}");
                                 if counter != 0 && counter % dir_per_deq == 0 {
                                     let shard_guard = srb_clone
                                         .enqueue_guard_in_shard(shard_ctr % num_deq)
                                         .await
                                         .unwrap();
+                                    done_send_clone.get(shard_ctr % num_deq).unwrap().done.set(false);
                                     srb_clone.enqueue(dirs, shard_guard);
                                     dirs = Vec::with_capacity(dir_per_deq);
                                     dirs.push(dir);
@@ -458,6 +453,7 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                                 .enqueue_guard_in_shard(shard_ctr % num_deq)
                                 .await
                                 .unwrap();
+                            done_send_clone.get(shard_ctr % num_deq).unwrap().done.set(false);
                             srb_clone.enqueue(dirs, shard_guard);
                         }
                     }
@@ -469,40 +465,46 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
                 enq.await.unwrap();
             }
 
-            srb.poison();
+            let shard_checker = tokio::spawn({
+                let done_send_clone = done_send.clone();
+                async move {
+                    let mut curr_idx = 0;
+                    loop {
+                        if curr_idx >= num_deq {break}
 
-            // necessary for poison
-            // let notifier_task = tokio::spawn({
-            //     let srb_clone = srb.clone();
-            //     async move {
-            //         loop {
-            //             for i in 0..num_deq {
-            //                 srb_clone.notify_dequeuer_in_shard(i % srb_clone.get_num_of_shards());
-            //             }
-            //             yield_now().await;
-            //         }
-            //     }
-            // });
+                        if done_send_clone.get(curr_idx).unwrap().done.get() == false {
+                            yield_now().await;
+                            continue;
+                        } else {
+                            curr_idx += 1;
+                        }
+                    }
+                }
+            });
+            shard_checker.await.unwrap();
 
-            for i in 0..num_deq {
-                srb.notify_dequeuer_in_shard(i % srb.get_num_of_shards());
-            }
-
-            for deq in deq_tasks {
-                deq.await.unwrap();
-            }
-
-            // notifier_task.abort();
+            // println!("{:?}, {:?}", receiver.len(), sender.len());
             if depth == 0 && config.min_depth != 0 {
                 depth = config.min_depth + 1;
             } else {
                 depth += 1;
             }
-            srb.clear_poison();
             if quit {
                 break;
             }
         }
+        srb.poison();
+
+        for i in 0..num_deq {
+            srb.notify_dequeuer_in_shard(i % srb.get_num_of_shards());
+        }
+
+        for deq in deq_tasks {
+            deq.await.unwrap();
+        }
+
+        srb.clear_poison();
+
         if quit {
             break;
         }
