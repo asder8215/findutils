@@ -7,20 +7,14 @@
 pub mod matchers;
 
 use matchers::{Follow, WalkEntry};
-use sharded_ringbuf::cs_srb::CSShardedRingBuf;
-use std::cell::RefCell;
-use std::cmp::{max, min};
 use std::collections::HashSet;
 use std::error::Error;
 use std::io::{stderr, stdout, BufWriter, Stdout, Write};
 use std::iter::IntoIterator;
 use std::path::PathBuf;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard, RwLock};
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{Arc, LazyLock, RwLock};
 use std::time::SystemTime;
-use tokio::runtime::Handle;
-use tokio::task::yield_now;
 use walkdir::WalkDir;
 
 pub struct Config {
@@ -176,9 +170,9 @@ fn parse_args(args: &[&str]) -> Result<ParsedInfo, Box<dyn Error>> {
 }
 
 fn process_dir(
-    // dir: &str,
+    dir: String,
     // dirs: Vec<String>,
-    dirs: impl IntoIterator<Item = String>,
+    // dirs: impl IntoIterator<Item = String>,
     config: &Config,
     deps: &dyn Dependencies,
     matcher: &dyn matchers::Matcher,
@@ -188,94 +182,94 @@ fn process_dir(
 ) -> Vec<WalkEntry> {
     let mut children_dirs = Vec::new();
     let mut ret = 0;
-    for dir in dirs {
-        // SAFETY: this lock is not held across an await point, so this
-        // is all good!
-        if matches!(config.follow, Follow::Always) | matches!(config.follow, Follow::Roots) {
-            if let Some(_) = PROCESSED_DIRS.read().unwrap().get(&dir) {
-                // println!("Dir is {dir}");
-                continue;
-            }
-        }
-
-        let mut walkdir = WalkDir::new(&dir)
-            .contents_first(config.depth_first)
-            .max_depth(depth)
-            .min_depth(depth)
-            .same_file_system(config.same_file_system)
-            .follow_links(config.follow == Follow::Always)
-            .follow_root_links(config.follow != Follow::Never);
-        if config.sorted_output {
-            walkdir = walkdir.sort_by(|a, b| a.file_name().cmp(b.file_name()));
-        }
-
-        // Slightly yucky loop handling here :-(. See docs for
-        // WalkDirIterator::skip_current_dir for explanation.
-        let mut it = walkdir.into_iter();
-        // As WalkDir seems not providing a function to check its stack,
-        // using current_dir is a workaround to check leaving directory.
-        let mut current_dir: Option<PathBuf> = None;
-        // let mut matcher_io = matchers::MatcherIO::new(deps);
-        while let Some(result) = it.next() {
-            match WalkEntry::from_walkdir(result, config.follow) {
-                Err(err) => {
-                    ret = 1;
-                    writeln!(&mut stderr(), "Error: {err}").unwrap();
-                }
-                Ok(entry) => {
-                    let mut matcher_io = matchers::MatcherIO::new(deps);
-
-                    let new_dir = entry.path().parent().map(|x| x.to_path_buf());
-                    if new_dir != current_dir {
-                        if let Some(dir) = current_dir.take() {
-                            matcher.finished_dir(dir.as_path(), &mut matcher_io);
-                        }
-                        current_dir = new_dir;
-                    }
-
-                    // println!("Entry is {:?}", &entry);
-                    matcher.matches(&entry, &mut matcher_io);
-                    match matcher_io.exit_code() {
-                        0 => {}
-                        code => ret = code,
-                    }
-                    if matcher_io.should_quit() {
-                        *quit = true;
-                        break;
-                    }
-                    if matcher_io.should_skip_current_dir() {
-                        it.skip_current_dir();
-                    }
-
-                    if entry.file_type().is_dir() {
-                        children_dirs.push(entry);
-                    }
-                }
-            }
-        }
-
-        let mut matcher_io = matchers::MatcherIO::new(deps);
-        if let Some(dir) = current_dir.take() {
-            matcher.finished_dir(dir.as_path(), &mut matcher_io);
-        }
-        matcher.finished(&mut matcher_io);
-        // This is implemented for exec +.
-        match matcher_io.exit_code() {
-            0 => {}
-            code => ret = code,
-        }
-
-        if dir_ret.load(Ordering::Relaxed) != 0 {
-            dir_ret.store(ret, Ordering::Relaxed);
-        }
-        // ret
-
-        // SAFETY: this lock is not held across an await point, so this
-        // is all good and we can officially denote this as visited
-        if matches!(config.follow, Follow::Always) | matches!(config.follow, Follow::Roots) {
-            PROCESSED_DIRS.write().unwrap().insert(dir);
+    // for dir in dirs {
+    // SAFETY: this lock is not held across an await point, so this
+    // is all good!
+    if matches!(config.follow, Follow::Always) | matches!(config.follow, Follow::Roots) {
+        if let Some(_) = PROCESSED_DIRS.read().unwrap().get(&dir) {
+            // println!("Dir is {dir}");
+            return children_dirs;
         }
     }
+
+    let mut walkdir = WalkDir::new(&dir)
+        .contents_first(config.depth_first)
+        .max_depth(depth)
+        .min_depth(depth)
+        .same_file_system(config.same_file_system)
+        .follow_links(config.follow == Follow::Always)
+        .follow_root_links(config.follow != Follow::Never);
+    if config.sorted_output {
+        walkdir = walkdir.sort_by(|a, b| a.file_name().cmp(b.file_name()));
+    }
+
+    // Slightly yucky loop handling here :-(. See docs for
+    // WalkDirIterator::skip_current_dir for explanation.
+    let mut it = walkdir.into_iter();
+    // As WalkDir seems not providing a function to check its stack,
+    // using current_dir is a workaround to check leaving directory.
+    let mut current_dir: Option<PathBuf> = None;
+    // let mut matcher_io = matchers::MatcherIO::new(deps);
+    while let Some(result) = it.next() {
+        match WalkEntry::from_walkdir(result, config.follow) {
+            Err(err) => {
+                ret = 1;
+                writeln!(&mut stderr(), "Error: {err}").unwrap();
+            }
+            Ok(entry) => {
+                let mut matcher_io = matchers::MatcherIO::new(deps);
+
+                let new_dir = entry.path().parent().map(|x| x.to_path_buf());
+                if new_dir != current_dir {
+                    if let Some(dir) = current_dir.take() {
+                        matcher.finished_dir(dir.as_path(), &mut matcher_io);
+                    }
+                    current_dir = new_dir;
+                }
+
+                // println!("Entry is {:?}", &entry);
+                matcher.matches(&entry, &mut matcher_io);
+                match matcher_io.exit_code() {
+                    0 => {}
+                    code => ret = code,
+                }
+                if matcher_io.should_quit() {
+                    *quit = true;
+                    break;
+                }
+                if matcher_io.should_skip_current_dir() {
+                    it.skip_current_dir();
+                }
+
+                if entry.file_type().is_dir() {
+                    children_dirs.push(entry);
+                }
+            }
+        }
+    }
+
+    let mut matcher_io = matchers::MatcherIO::new(deps);
+    if let Some(dir) = current_dir.take() {
+        matcher.finished_dir(dir.as_path(), &mut matcher_io);
+    }
+    matcher.finished(&mut matcher_io);
+    // This is implemented for exec +.
+    match matcher_io.exit_code() {
+        0 => {}
+        code => ret = code,
+    }
+
+    if dir_ret.load(Ordering::Relaxed) != 0 {
+        dir_ret.store(ret, Ordering::Relaxed);
+    }
+    // ret
+
+    // SAFETY: this lock is not held across an await point, so this
+    // is all good and we can officially denote this as visited
+    if matches!(config.follow, Follow::Always) | matches!(config.follow, Follow::Roots) {
+        PROCESSED_DIRS.write().unwrap().insert(dir);
+    }
+    // }
     children_dirs
 }
 
@@ -293,27 +287,19 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
     let ret = Arc::new(AtomicI32::new(0));
     let mut quit = false;
 
-    let handle = Handle::current();
-    let metrics = handle.metrics();
-    let num_workers = metrics.num_workers();
-    // let srb = ShardedRingBuf::<Vec<String>>::new_with_enq_num(num_workers, num_workers, 1);
-    let srb = CSShardedRingBuf::<Vec<String>>::new_with_enq_num(num_workers, num_workers, 1);
-    // let processed_dirs = Arc::new(RwLock::new(HashSet::new()));
 
     let config = Arc::new(paths_and_matcher.config);
     let matcher = Arc::new(paths_and_matcher.matcher);
     let deps = Arc::new(deps);
 
     for path in paths_and_matcher.paths {
-        // println!("something is happening");
         let config_clone = config.clone();
         let matcher_clone = matcher.clone();
         let deps_clone = deps.clone();
-        // let ret_clone = ret.clone();
         let mut depth = 0;
         if depth == config.min_depth {
             process_dir(
-                vec![path.clone()],
+                path.clone(),
                 &config_clone,
                 &**deps_clone,
                 &*matcher_clone,
@@ -338,167 +324,63 @@ async fn do_find(args: &[&str], deps: Box<dyn Dependencies>) -> Result<i32, Box<
         let (sender, receiver) = kanal::unbounded();
         let _ = sender.send(path);
         loop {
-            // println!("sender: {:?}", sender.len());
             // when the receiver is empty or if we reached our max depth,
             // there are no more directories we need to check
             if depth > config.max_depth || receiver.is_empty() {
-                // println!("hello");
                 break;
             }
 
-            // to spawn only the exact number of dequeuers needed,
-            // we grab either the minimum of receiver or number of
-            // cores we have as well as use that information to
-            // decide how to distribute the dirs evenly among dequeuers
-            let num_deq = max(1, min(receiver.len(), num_workers));
-            let dir_per_deq = max(1, receiver.len() / num_deq);
-            let mut deq_tasks = Vec::with_capacity(num_deq);
-            let mut enq_task = Vec::with_capacity(1);
-
-            for deq_task_i in 0..num_deq {
-                let deq_handle = tokio::spawn({
-                    let srb_clone = srb.clone();
-                    let sender_clone = sender.clone();
-                    let config = config.clone();
-                    let matcher = matcher.clone();
-                    let deps = deps.clone();
-                    let ret_clone = ret.clone();
-                    async move {
-                        loop {
-                            // println!("hello?");
-                            match srb_clone.dequeue_in_shard(deq_task_i).await {
-                                Some(dirs) => {
-                                    // println!("smth");
-
-                                    // for dir in dirs {
-                                    // println!("Dir is {dir}");
-                                    // SAFETY: this lock is not held across an await point, so this
-                                    // is all good!
-
-                                    // if matches!(config.follow, Follow::Always) | matches!(config.follow, Follow::Roots) {
-                                    //     if let Some(_) = processed_dirs_clone.read().unwrap().get(&dir) {
-                                    //         // println!("Dir is {dir}");
-                                    //         continue;
-                                    //     }
-                                    // }
-                                    // let dirs = srb_clone.dequeue_item(shard_guard);
-                                    // println!("{:?}", dirs);
-                                    // what do I want process_dir to do?
-                                    // take a dir path, then match itself and its descendants,
-                                    // collect any directories into a Vec, and send the directory
-                                    // descendants into the kanal channel
-                                    let children_dirs: Vec<WalkEntry>;
-                                    if depth == 0 && config.min_depth != 0 {
-                                        // children_dirs = process_dir(&dir, &config, &**deps, &*matcher, &mut quit, &ret_clone, config.min_depth);
-                                        children_dirs = process_dir(
-                                            dirs,
-                                            &config,
-                                            &**deps,
-                                            &*matcher,
-                                            &mut quit,
-                                            &ret_clone,
-                                            config.min_depth,
-                                        );
-                                    } else {
-                                        // children_dirs = process_dir(&dir, &config, &**deps, &*matcher, &mut quit, &ret_clone, 1);
-                                        children_dirs = process_dir(
-                                            dirs, &config, &**deps, &*matcher, &mut quit,
-                                            &ret_clone, 1,
-                                        );
-                                    }
-
-                                    // add in any child directories to the sender
-                                    for child in children_dirs {
-                                        let _ = sender_clone
-                                            .send(child.into_path().to_string_lossy().into_owned());
-                                    }
-                                    // }
-                                }
-                                None => break,
-                            }
-                        }
-                    }
-                });
-                deq_tasks.push(deq_handle);
-            }
-
-            {
-                let enq_handle = tokio::spawn({
-                    let srb_clone = srb.clone();
-                    let receiver_clone = receiver.clone();
-                    async move {
-                        let mut counter = 0;
-                        let mut shard_ctr = 0;
-                        let mut dirs = Vec::with_capacity(dir_per_deq);
-                        let len = receiver_clone.len();
-                        let mut recv_count = 0;
-
-                        while recv_count < len {
-                            if let Ok(dir) = receiver_clone.recv() {
-                                // println!("{dir}");
-                                if counter != 0 && counter % dir_per_deq == 0 {
-                                    let shard_guard = srb_clone
-                                        .enqueue_guard_in_shard(shard_ctr % num_deq)
-                                        .await
-                                        .unwrap();
-                                    srb_clone.enqueue(dirs, shard_guard);
-                                    dirs = Vec::with_capacity(dir_per_deq);
-                                    dirs.push(dir);
-                                    counter += 1;
-                                    shard_ctr += 1;
+            let recv_len = receiver.len();
+            let mut process_dir_vec = Vec::with_capacity(recv_len);
+            
+            for _ in 0..recv_len {
+                if let Ok(dir) = receiver.recv() {
+                    let dir_handle = tokio::spawn(
+                    {
+                            let ret_clone = ret.clone();
+                            let sender_clone = sender.clone();
+                            let config = config.clone();
+                            let matcher = matcher.clone();
+                            let deps = deps.clone();
+                            async move {
+                                let children_dirs: Vec<WalkEntry>;
+                                if depth == 0 && config.min_depth != 0 {
+                                    children_dirs = process_dir(
+                                        dir,
+                                        &config,
+                                        &**deps,
+                                        &*matcher,
+                                        &mut quit,
+                                        &ret_clone,
+                                        config.min_depth,
+                                    );
                                 } else {
-                                    dirs.push(dir);
-                                    counter += 1;
+                                    children_dirs = process_dir(
+                                        dir, &config, &**deps, &*matcher, &mut quit,
+                                        &ret_clone, 1,
+                                    );
                                 }
-                                recv_count += 1;
+                                for child in children_dirs {
+                                    let _ = sender_clone
+                                        .send(child.into_path().to_string_lossy().into_owned());
+                                }
                             }
                         }
-                        if !dirs.is_empty() {
-                            let shard_guard = srb_clone
-                                .enqueue_guard_in_shard(shard_ctr % num_deq)
-                                .await
-                                .unwrap();
-                            srb_clone.enqueue(dirs, shard_guard);
-                        }
-                    }
-                });
-                enq_task.push(enq_handle);
+                    );
+                    process_dir_vec.push(dir_handle);
+                }
             }
 
-            for enq in enq_task {
-                enq.await.unwrap();
+            for process_dir in process_dir_vec {
+                process_dir.await.unwrap();
             }
 
-            srb.poison();
-
-            // necessary for poison
-            // let notifier_task = tokio::spawn({
-            //     let srb_clone = srb.clone();
-            //     async move {
-            //         loop {
-            //             for i in 0..num_deq {
-            //                 srb_clone.notify_dequeuer_in_shard(i % srb_clone.get_num_of_shards());
-            //             }
-            //             yield_now().await;
-            //         }
-            //     }
-            // });
-
-            for i in 0..num_deq {
-                srb.notify_dequeuer_in_shard(i % srb.get_num_of_shards());
-            }
-
-            for deq in deq_tasks {
-                deq.await.unwrap();
-            }
-
-            // notifier_task.abort();
             if depth == 0 && config.min_depth != 0 {
                 depth = config.min_depth + 1;
             } else {
                 depth += 1;
             }
-            srb.clear_poison();
+
             if quit {
                 break;
             }
@@ -582,8 +464,10 @@ pub async fn find_main(args: &[&str], deps: Box<dyn Dependencies>) -> i32 {
 #[cfg(test)]
 mod tests {
 
+    use std::cell::RefCell;
     use std::fs;
     use std::io::{Cursor, ErrorKind, Read};
+    use std::sync::Mutex;
     use std::time::Duration;
     use tempfile::Builder;
 

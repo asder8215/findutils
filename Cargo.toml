@@ -33,7 +33,7 @@ tempfile = "3"
 pretty_assertions = "1.4.1"
 
 [[bin]]
-name = "find"
+name = "tokio_find"
 path = "src/find/main.rs"
 
 [[bin]]
